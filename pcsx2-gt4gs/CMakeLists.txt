@@ -21,8 +21,12 @@ target_compile_features(gt4gs_stream_transport PRIVATE cxx_std_20)
 target_compile_definitions(gt4gs_stream_transport PRIVATE _HAS_EXCEPTIONS=1)
 if(MSVC)
 	target_compile_options(gt4gs_stream_transport PRIVATE /EHsc /wd4005)
+else()
+	target_compile_options(gt4gs_stream_transport PRIVATE -fexceptions)
 endif()
-target_link_libraries(gt4gs_stream_transport PUBLIC kernel32 advapi32)
+if(WIN32)
+	target_link_libraries(gt4gs_stream_transport PUBLIC kernel32 advapi32)
+endif()
 
 add_executable(pcsx2-gt4gs)
 set_target_properties(pcsx2-gt4gs PROPERTIES OUTPUT_NAME "gt4-gs")
@@ -36,6 +40,12 @@ endif()
 target_sources(pcsx2-gt4gs PRIVATE
 	Main.cpp
 )
+if(APPLE)
+	# GT4Recomp: the picture is a remote Core Animation layer hosted by the game window (MacPresentation.mm).
+	target_sources(pcsx2-gt4gs PRIVATE MacPresentation.mm MacPresentation.h)
+	set_source_files_properties(MacPresentation.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc" SKIP_PRECOMPILE_HEADERS ON)
+	target_link_libraries(pcsx2-gt4gs PRIVATE "-framework AppKit" "-framework QuartzCore" "-framework CoreGraphics")
+endif()
 
 target_include_directories(pcsx2-gt4gs PRIVATE
 	"${CMAKE_BINARY_DIR}/common/include"

@@ -2,8 +2,20 @@
 // GS stream files (.gscap version 2); see gs_stream_file.hpp.
 #include "gs_stream_file.hpp"
 
+#include <cerrno>
+#include <cstdio>
 #include <cstring>
 #include <stdexcept>
+
+#ifndef _WIN32
+namespace {
+// The Windows CRT call this file uses; local so the file is self-contained when vendored (gt4recomp-gs).
+int fopen_s(std::FILE **file, const char *path, const char *mode) {
+  *file = std::fopen(path, mode);
+  return *file ? 0 : errno;
+}
+} // namespace
+#endif
 
 namespace gs_stream {
 

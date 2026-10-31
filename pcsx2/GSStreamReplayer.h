@@ -86,6 +86,10 @@ namespace GSStreamReplayer
 		void (*resize)(u32 width, u32 height) = nullptr;
 		// Protocol 1.2 CONTROL cursor: auto-hide flags (kCursorFlag*) and the delay without movement.
 		void (*cursor)(u64 flags, u32 hide_delay_ms) = nullptr;
+		// macOS: the Core Animation context id of the consumer's picture layer after a successful attach. The game hosts
+		// that layer in its window (CALayerHost), since another process cannot own a child of its window. It travels in
+		// WindowPayload.reserved2 of the WINDOW restored event (zero on Windows, where the child window is the picture).
+		u64 (*presentation_id)() = nullptr;
 	};
 
 	// Called by the frontend before VMManager::Initialize. Takes ownership of the source.

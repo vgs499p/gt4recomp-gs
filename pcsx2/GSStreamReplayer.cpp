@@ -60,6 +60,9 @@
 #include "fmt/format.h"
 
 #include <algorithm>
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 #include <cstring>
 #include <memory>
 #include <vector>
@@ -620,7 +623,8 @@ namespace
 				}
 				MTGS::UpdateDisplayWindow();
 				MTGS::ResizeDisplayWindow(width, height, 1.0f);
-				proto::WindowPayload window{static_cast<u32>(proto::WindowState::restored), 0, 0};
+				proto::WindowPayload window{static_cast<u32>(proto::WindowState::restored), 0,
+					s_hooks.presentation_id ? s_hooks.presentation_id() : 0};
 				s_source->PostEvent(static_cast<u16>(proto::RecordType::window), &window, sizeof(window));
 				return true;
 			}
@@ -702,7 +706,11 @@ namespace
 		proto::ReadyPayload ready{};
 		ready.version_major = proto::kVersionMajor;
 		ready.version_minor = GSStreamReplayer::Protocol13::kConsumerVersionMinor; // 1.3 (gt4-gs 1.1.0)
+#ifdef _WIN32
 		ready.consumer_pid = static_cast<u32>(GetCurrentProcessId());
+#else
+		ready.consumer_pid = static_cast<u32>(getpid());
+#endif
 		ready.flags = proto::kReadyFlagPresents;
 		if (GSStreamOverlay::WantsOsdStats())
 			ready.flags |= proto::kReadyFlagOsdStats; // the performance overlay is on: the game sends OSD_STATS

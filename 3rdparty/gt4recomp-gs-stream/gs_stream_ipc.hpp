@@ -15,6 +15,12 @@
 // death of the peer ends the wait with PeerExited instead of a hang.
 //
 // Threading: one producer thread and one consumer thread per ring. The Session object itself is not shared.
+//
+// macOS / POSIX: the mapping is a POSIX shared memory object ("/gs<last 24 hex digits of the name>m") and the four
+// events are four 32-bit wake counters in a second object ("...w"). A signal increments its counter and wakes one
+// waiter (os_sync_wake_by_address_any, shared); a sleeper waits while the counter still holds the value it read
+// before re-checking its condition, so the waiter-flag protocol above is unchanged. A peer process "handle" is its
+// pid; sleeps last at most one slice and check that the pid is still alive. The ControlBlock layout is identical.
 #pragma once
 
 #include "gs_stream_protocol.h"
@@ -27,7 +33,7 @@
 
 namespace gs_stream::ipc {
 
-using NativeHandle = void *;  // HANDLE on Windows
+using NativeHandle = void *;  // HANDLE on Windows; the pid (as an integer) of a peer process on POSIX
 
 class IpcError : public std::runtime_error {
  public:
@@ -122,6 +128,8 @@ struct WaitTotals {
   std::uint64_t frames_wait_us = 0, frames_waits = 0;
   std::uint64_t response_wait_us = 0;
   std::uint64_t data_wait_us = 0;
+  // TASK-041: events signalled to a sleeping peer (one SetEvent each), indexed by Wake.
+  std::uint64_t wakes_signalled[4] = {};
 };
 
 class Session {
@@ -145,6 +153,12 @@ class Session {
   void set_peer(NativeHandle process) { peer_ = process; }
   // Spin time before a sleep, in microseconds (default 30).
   void set_spin_us(std::uint32_t spin_us) { spin_us_ = spin_us; }
+  // TASK-041: producer wake batching. A sleeping consumer is woken after `bytes` of GIF/PRIV records since the last
+  // wake-up, at once for every other record type (VSYNC, READ_FIFO, RESET, CONTROL), and before the producer waits
+  // itself (ring space). 0 wakes it for every record (slice191-196 behaviour). Default kDefaultDataWakeBytes.
+  static constexpr std::uint64_t kDefaultDataWakeBytes = 256u << 10;
+  void set_data_wake_bytes(std::uint64_t bytes) { data_wake_bytes_ = bytes; }
+  std::uint64_t data_wake_bytes() const { return data_wake_bytes_; }
   const WaitTotals &wait_totals() const { return waits_; }
   void set_wait_hooks(WaitHooks hooks) { hooks_ = hooks; }
 
@@ -188,13 +202,22 @@ class Session {
 
   bool producer_ = false;
   std::string name_;
+#ifdef _WIN32
   NativeHandle mapping_ = nullptr;
+#endif
   std::uint8_t *view_ = nullptr;
   ControlBlock *control_ = nullptr;
   std::uint8_t *response_ = nullptr;
+#ifdef _WIN32
   NativeHandle events_[4] = {};
+#else
+  std::uint64_t mapped_bytes_ = 0;
+  std::uint32_t *wake_words_ = nullptr;  // the four wake counters (Wake order), in their own shared object
+#endif
   NativeHandle peer_ = nullptr;
   std::uint32_t spin_us_ = 30;
+  std::uint64_t data_wake_bytes_ = kDefaultDataWakeBytes;
+  std::uint64_t bytes_since_data_wake_ = 0;  // producer: record bytes posted since the last data wake-up check
   RingWriter writer_;
   RingReader reader_;
   WaitTotals waits_;
@@ -202,6 +225,8 @@ class Session {
 };
 
 // A child process in a Job Object with JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: closing the job (destructor) ends it.
+// POSIX: a posix_spawn child that the destructor kills (SIGKILL) and reaps when it still runs; children still running
+// at a normal process exit are killed by an atexit handler. Nothing ends them when this process is itself killed.
 class ChildProcess {
  public:
   ChildProcess() = default;
@@ -234,5 +259,9 @@ NativeHandle open_process_for_wait(std::uint32_t pid);
 void close_handle(NativeHandle handle);
 std::uint32_t current_process_id();
 std::wstring widen(const std::string &text);
+#ifndef _WIN32
+// UTF-32 (wchar_t on POSIX) to UTF-8, the inverse of widen.
+std::string narrow(const std::wstring &text);
+#endif
 
 }  // namespace gs_stream::ipc

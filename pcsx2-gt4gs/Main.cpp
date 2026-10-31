@@ -34,6 +34,9 @@
 #include <mutex>
 #include <thread>
 
+#ifdef __APPLE__
+#include "MacPresentation.h"
+#endif
 #ifdef _WIN32
 #include "common/RedtapeWindows.h"
 #endif
@@ -968,6 +971,9 @@ bool GSRunner::PrepareStream()
 		hooks.attach = &GSRunner::AttachToGameWindow;
 		hooks.resize = &GSRunner::ResizeGameChildWindow;
 		hooks.cursor = &GSRunner::SetGameCursorPolicy;
+#ifdef __APPLE__
+		hooks.presentation_id = &GT4GSMac::PresentationId;
+#endif
 	}
 	else
 	{
@@ -2107,9 +2113,17 @@ int wmain(int argc, wchar_t** argv)
 static void* s_window;
 static WindowInfo s_wi;
 
+static bool s_live_view = false; // GT4Recomp: live mode draws into a window-less view shared with the game
+
 bool GSRunner::CreatePlatformWindow()
 {
-	pxAssertRel(!s_window, "Tried to create window when there already was one!");
+	pxAssertRel(!s_window && !s_live_view, "Tried to create window when there already was one!");
+	if (s_stream_mode == StreamMode::Live)
+	{
+		// GT4Recomp: no window of our own; the picture layer is hosted by the game window (MacPresentation.mm).
+		s_live_view = GT4GSMac::CreateLiveView(&s_wi, WINDOW_WIDTH, WINDOW_HEIGHT);
+		return s_live_view;
+	}
 	s_window = CocoaTools::CreateWindow("PCSX2 GS Runner", WINDOW_WIDTH, WINDOW_HEIGHT);
 	CocoaTools::GetWindowInfoFromWindow(&s_wi, s_window);
 	PumpPlatformMessages();
@@ -2118,6 +2132,11 @@ bool GSRunner::CreatePlatformWindow()
 
 void GSRunner::DestroyPlatformWindow()
 {
+	if (s_live_view)
+	{
+		GT4GSMac::DestroyLiveView();
+		s_live_view = false;
+	}
 	if (s_window) {
 		CocoaTools::DestroyWindow(s_window);
 		s_window = nullptr;
@@ -2127,11 +2146,38 @@ void GSRunner::DestroyPlatformWindow()
 std::optional<WindowInfo> GSRunner::GetPlatformWindowInfo()
 {
 	WindowInfo wi;
-	if (s_window)
+	if (s_window || s_live_view)
 		wi = s_wi;
 	else
 		wi.type = WindowInfo::Type::Surfaceless;
 	return wi;
+}
+
+bool GSRunner::AttachToGameWindow(u64 parent_window, u32 width, u32 height)
+{
+	if (!s_live_view)
+		return false; // surfaceless
+	const bool ok = GT4GSMac::AttachToGameWindow(std::max<u32>(width, 1), std::max<u32>(height, 1));
+	if (ok)
+	{
+		s_wi.surface_width = std::max<u32>(width, 1);
+		s_wi.surface_height = std::max<u32>(height, 1);
+	}
+	Console.WriteLnFmt("gt4-gs: picture layer for game window 0x{:X} ({}x{}): {} (context {})", parent_window, width,
+		height, ok ? "ok" : "failed", GT4GSMac::PresentationId());
+	return ok;
+}
+
+void GSRunner::SetGameCursorPolicy(u64 flags, u32 hide_delay_ms)
+{
+	// The game window receives the mouse over the hosted layer, so the game applies its own cursor policy there.
+}
+
+void GSRunner::ResizeGameChildWindow(u32 width, u32 height)
+{
+	s_wi.surface_width = width;
+	s_wi.surface_height = height;
+	GT4GSMac::Resize(width, height);
 }
 
 void GSRunner::PumpPlatformMessages(bool forever)
