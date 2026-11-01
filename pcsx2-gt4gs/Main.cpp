@@ -918,17 +918,27 @@ static bool ApplyStreamFolders()
 {
 	if (!s_data_root_from_config)
 	{
-		// No [GT4GS] DataRoot: %LOCALAPPDATA%\GT4Recomp\gt4-gs.
+		// No [GT4GS] DataRoot: %LOCALAPPDATA%\GT4Recomp\gt4-gs (macOS: ~/Library/Application Support/GT4Recomp/gt4-gs).
+#ifdef __APPLE__
+		const char* home = std::getenv("HOME");
+		if (!home || !*home)
+		{
+			Console.Error("HOME is not set and the config has no [GT4GS] DataRoot.");
+			return false;
+		}
+		const std::string local = Path::Combine(home, "Library/Application Support");
+#else
 		const char* local = std::getenv("LOCALAPPDATA");
 		if (!local || !*local)
 		{
 			Console.Error("LOCALAPPDATA is not set and the config has no [GT4GS] DataRoot.");
 			return false;
 		}
+#endif
 		EmuFolders::DataRoot = Path::Combine(Path::Combine(local, "GT4Recomp"), "gt4-gs");
 	}
 	if (!FileSystem::DirectoryExists(EmuFolders::DataRoot.c_str()) &&
-		!FileSystem::CreateDirectoryPath(EmuFolders::DataRoot.c_str(), false))
+		!FileSystem::CreateDirectoryPath(EmuFolders::DataRoot.c_str(), true))
 	{
 		Console.ErrorFmt("Cannot create the gt4-gs data folder {}.", EmuFolders::DataRoot);
 		return false;
@@ -943,10 +953,17 @@ static bool ApplyStreamFolders()
 	return true;
 }
 
+// The stream modes' default renderer: Vulkan, and Metal on macOS (the macOS build has no Vulkan renderer).
+#ifdef __APPLE__
+static constexpr GSRendererType kStreamRenderer = GSRendererType::Metal;
+#else
+static constexpr GSRendererType kStreamRenderer = GSRendererType::VK;
+#endif
+
 // Opens the live session or the stream file and hands it to GSStreamReplayer (before VMManager::Initialize).
 bool GSRunner::PrepareStream()
 {
-	const int renderer = s_settings_interface.GetIntValue("EmuCore/GS", "Renderer", static_cast<int>(GSRendererType::VK));
+	const int renderer = s_settings_interface.GetIntValue("EmuCore/GS", "Renderer", static_cast<int>(kStreamRenderer));
 	const float scale = s_settings_interface.GetFloatValue("EmuCore/GS", "upscale_multiplier", 1.0f);
 	const std::string renderer_name = fmt::format("PCSX2 GS {} x{:g}",
 		Pcsx2Config::GSOptions::GetRendererName(static_cast<GSRendererType>(renderer)), scale);
@@ -1446,7 +1463,7 @@ void GSRunner::SettingsOverride()
 	if (s_stream_mode != StreamMode::None)
 	{
 		// GT4Recomp defaults; the --config file can change them (applied after this function).
-		s_settings_interface.SetIntValue("EmuCore/GS", "Renderer", static_cast<int>(GSRendererType::VK));
+		s_settings_interface.SetIntValue("EmuCore/GS", "Renderer", static_cast<int>(kStreamRenderer));
 		s_settings_interface.SetIntValue("EmuCore/GS", "accurate_blending_unit", static_cast<int>(AccBlendLevel::High));
 		s_settings_interface.SetIntValue("EmuCore/GS", "deinterlace_mode", static_cast<int>(GSInterlaceMode::Automatic));
 		s_settings_interface.SetStringValue("EmuCore/GS", "AspectRatio", "16:9");
