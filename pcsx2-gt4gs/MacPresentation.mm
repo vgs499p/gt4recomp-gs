@@ -31,10 +31,29 @@ extern "C" uint32_t CGSMainConnectionID(void);
 
 namespace
 {
-	NSView* s_view = nil; // window-less view whose layer the Metal device creates (GSDeviceMTL::AttachSurfaceOnMainThread)
+	void LayerChanged();
+}
+
+// The Metal device replaces the view's layer whenever it rebuilds its surface (GSDeviceMTL::UpdateWindow, which runs on
+// every attach and window change). The shared context must always carry the current layer, so the view reports it.
+@interface GT4GSLiveView : NSView
+@end
+
+@implementation GT4GSLiveView
+- (void)setLayer:(CALayer*)layer
+{
+	[super setLayer:layer];
+	LayerChanged();
+}
+@end
+
+namespace
+{
+	GT4GSLiveView* s_view = nil; // window-less view whose layer the Metal device creates (AttachSurfaceOnMainThread)
 	CAContext* s_context = nil;
 	std::atomic<uint32_t> s_context_id{0};
 	float s_scale = 1.0f;
+	uint32_t s_width = 0, s_height = 0; // the game's drawable size in pixels (attach and resize)
 
 	template <typename F>
 	void OnMainThread(F&& function)
@@ -59,6 +78,17 @@ namespace
 		layer.contentsScale = s_scale;
 		[CATransaction commit];
 	}
+
+	// Main thread: the device's new layer becomes the shared root (or the context is left empty while it has none).
+	void LayerChanged()
+	{
+		if (!s_context)
+			return;
+		CALayer* layer = s_view.layer;
+		if (layer && s_width && s_height)
+			SetLayerSize(s_width, s_height);
+		s_context.layer = layer;
+	}
 } // namespace
 
 bool GT4GSMac::CreateLiveView(WindowInfo* wi, uint32_t width, uint32_t height)
@@ -69,7 +99,7 @@ bool GT4GSMac::CreateLiveView(WindowInfo* wi, uint32_t width, uint32_t height)
 		// A background process: no Dock icon, no menu bar, never activated.
 		[NSApp setActivationPolicy:NSApplicationActivationPolicyProhibited];
 		s_scale = static_cast<float>([[NSScreen mainScreen] backingScaleFactor]);
-		s_view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, width / s_scale, height / s_scale)];
+		s_view = [[GT4GSLiveView alloc] initWithFrame:NSMakeRect(0, 0, width / s_scale, height / s_scale)];
 		wi->type = WindowInfo::Type::MacOS;
 		wi->window_handle = (__bridge void*)s_view;
 		wi->surface_width = width;
@@ -110,8 +140,9 @@ bool GT4GSMac::AttachToGameWindow(uint32_t width, uint32_t height)
 			if (!s_context)
 				return;
 		}
-		SetLayerSize(width, height);
-		s_context.layer = s_view.layer;
+		s_width = width;
+		s_height = height;
+		LayerChanged();
 		s_context_id.store(s_context.contextId);
 		ok = s_context.contextId != 0;
 	});
@@ -121,6 +152,8 @@ bool GT4GSMac::AttachToGameWindow(uint32_t width, uint32_t height)
 void GT4GSMac::Resize(uint32_t width, uint32_t height)
 {
 	dispatch_async(dispatch_get_main_queue(), ^{
+		s_width = width;
+		s_height = height;
 		SetLayerSize(width, height);
 	});
 }
