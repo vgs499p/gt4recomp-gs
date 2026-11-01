@@ -7,6 +7,7 @@
 # resources/Metal23.metallib (macOS 11+ target, the library GSMTLDeviceInfo.mm loads first), plus COPYING.GPLv3,
 # NOTICE, README.md and SOURCE.txt. The CMake build of the Qt app compiles the shaders into its bundle; gt4-gs is a
 # plain executable, so the library sits in resources/ (EmuFolders::Resources = <executable folder>/resources).
+# SOURCE.txt names the repository that holds the commit (GT4GS_SOURCE_URL, default the macOS fork).
 set -eu
 build="$1"
 out="$2"
@@ -29,7 +30,7 @@ xcrun metallib -o "$out/resources/Metal23.metallib" "$out"/air/*.air
 rm -rf "$out/air"
 cp "$root/COPYING.GPLv3" "$root/gt4gs/NOTICE" "$root/gt4gs/README.md" "$out/"
 {
-	echo "source: https://github.com/moesuito/gt4recomp-gs (GT4Recomp fork of PCSX2, GPL-3.0-or-later)"
+	echo "source: ${GT4GS_SOURCE_URL:-https://github.com/vgs499p/gt4recomp-gs} (GT4Recomp fork of PCSX2, GPL-3.0-or-later)"
 	echo "commit: $(git -C "$root" rev-parse HEAD)"
 	echo "platform: macOS $(uname -m)"
 } > "$out/SOURCE.txt"
