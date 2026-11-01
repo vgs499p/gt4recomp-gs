@@ -963,6 +963,17 @@ static constexpr GSRendererType kStreamRenderer = GSRendererType::VK;
 // Opens the live session or the stream file and hands it to GSStreamReplayer (before VMManager::Initialize).
 bool GSRunner::PrepareStream()
 {
+#ifdef __APPLE__
+	// The GT4Recomp launcher writes the Windows renderers (Vulkan, D3D12, D3D11); none of them is built on macOS, so a
+	// GPU renderer request becomes Metal. The software renderer is left as asked.
+	const int requested = s_settings_interface.GetIntValue("EmuCore/GS", "Renderer", static_cast<int>(kStreamRenderer));
+	if (requested == static_cast<int>(GSRendererType::VK) || requested == static_cast<int>(GSRendererType::DX12) ||
+		requested == static_cast<int>(GSRendererType::DX11))
+	{
+		std::fprintf(stderr, "gt4-gs: renderer %d is not built on macOS; using Metal\n", requested);
+		s_settings_interface.SetIntValue("EmuCore/GS", "Renderer", static_cast<int>(GSRendererType::Metal));
+	}
+#endif
 	const int renderer = s_settings_interface.GetIntValue("EmuCore/GS", "Renderer", static_cast<int>(kStreamRenderer));
 	const float scale = s_settings_interface.GetFloatValue("EmuCore/GS", "upscale_multiplier", 1.0f);
 	const std::string renderer_name = fmt::format("PCSX2 GS {} x{:g}",
